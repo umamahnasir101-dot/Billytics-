@@ -280,29 +280,29 @@ def alternatives_by_salt(salt):
     return sorted([m for m in MEDICINES if m["salt"] == salt], key=lambda x: x["price"])
 
 # ------------------------------------------------------------
-# CLAUDE API — used ONLY to read/extract bill fields & explain in Urdu.
+# GROQ API — used ONLY to read/extract bill fields & explain in Urdu.
 # All money math is done by the functions above, never by the model.
 # ------------------------------------------------------------
-def call_claude(messages, system=None, max_tokens=1024):
+GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+GROQ_TEXT_MODEL = "llama-3.3-70b-versatile"
+
+def call_groq(messages, model, max_tokens=1024):
     try:
-        import anthropic
+        from groq import Groq
     except ImportError:
-        st.error("The 'anthropic' package isn't installed. Add it to requirements.txt.")
+        st.error("The 'groq' package isn't installed. Add it to requirements.txt.")
         return None
-    api_key = st.secrets.get("ANTHROPIC_API_KEY", None)
+    api_key = st.secrets.get("GROQ_API_KEY", None)
     if not api_key:
-        st.error("No ANTHROPIC_API_KEY found in Streamlit secrets.")
+        st.error("No GROQ_API_KEY found in Streamlit secrets.")
         return None
-    client = anthropic.Anthropic(api_key=api_key)
-    model = st.secrets.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-    kwargs = {"model": model, "max_tokens": max_tokens, "messages": messages}
-    if system:
-        kwargs["system"] = system
-    resp = client.messages.create(**kwargs)
-    return "".join(block.text for block in resp.content if block.type == "text")
+    client = Groq(api_key=api_key)
+    resp = client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens)
+    return resp.choices[0].message.content
 
 def extract_bill_fields(image_bytes, media_type):
     b64 = base64.b64encode(image_bytes).decode()
+    data_url = f"data:{media_type};base64,{b64}"
     system = (
         "You extract fields from a Pakistani electricity bill photo. "
         "Return ONLY valid JSON, no extra text, with keys: "
@@ -310,14 +310,14 @@ def extract_bill_fields(image_bytes, media_type):
         "due_date (string), meter_number (string or null). "
         "If a field is unreadable, use null. Never invent numbers."
     )
-    messages = [{
-        "role": "user",
-        "content": [
-            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
-            {"type": "text", "text": "Extract the bill fields as instructed."}
-        ]
-    }]
-    raw = call_claude(messages, system=system, max_tokens=400)
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": [
+            {"type": "text", "text": "Extract the bill fields as instructed."},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]},
+    ]
+    raw = call_groq(messages, model=GROQ_VISION_MODEL, max_tokens=400)
     if not raw:
         return None
     cleaned = re.sub(r"```json|```", "", raw).strip()
@@ -333,14 +333,14 @@ def urdu_explain(bill_calc, units):
         f"Fuel surcharge: Rs {bill_calc['fc_surcharge']:.0f}, GST: Rs {bill_calc['gst']:.0f}, "
         f"TV fee: Rs {bill_calc['tv_fee']}, Total: Rs {bill_calc['total']:.0f}"
     )
-    messages = [{"role": "user", "content": text}]
-    return call_claude(messages, system=system, max_tokens=300)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": text}]
+    return call_groq(messages, model=GROQ_TEXT_MODEL, max_tokens=300)
 
 def draft_complaint(flags, bill_data):
     system = "Write a short, polite, formal complaint letter (English) to a Pakistani electricity company (IESCO-style) about the billing issues listed. Under 150 words. Include placeholders [Your Name], [Account Number], [Address]."
     text = "Issues found: " + "; ".join(flags) + f"\nBill data: {bill_data}"
-    messages = [{"role": "user", "content": text}]
-    return call_claude(messages, system=system, max_tokens=350)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": text}]
+    return call_groq(messages, model=GROQ_TEXT_MODEL, max_tokens=350)
 
 # ==============================================================
 # PAGE: HOME

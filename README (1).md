@@ -18,6 +18,6 @@ presentation.
 2. Go to https://share.streamlit.io, connect the repo, set main file to `app.py`.
 3. In the app's "Secrets" settings, add:
    ```
-   ANTHROPIC_API_KEY = "your-key-here"
+   GROQ_API_KEY = "your-key-here"
    ```
 4. Deploy. Done.
